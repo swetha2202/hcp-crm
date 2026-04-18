@@ -1,272 +1,378 @@
-# HCP CRM – AI-First CRM System for Life Sciences
+\# HCP CRM - AI-First CRM for Life Sciences
 
-An AI-First Customer Relationship Management (CRM) system focused on the **Healthcare Professional (HCP) Module**, built for pharmaceutical field representatives. This system allows reps to log HCP interactions via a **structured form** or a **conversational AI chat interface** powered by LangGraph and Groq.
 
----
 
-## 🏗️ Architecture Overview
+\## Overview
 
-```
-┌─────────────────────┐        ┌──────────────────────────────────────────────┐
-│  React Frontend     │        │         FastAPI Backend                       │
-│  (Redux State Mgmt) │◄──────►│  ┌──────────────┐   ┌─────────────────────┐  │
-│                     │  REST  │  │   Routers     │   │  LangGraph Agent    │  │
-│  • LogInteraction   │  API   │  │  /interactions│   │  ┌───────────────┐  │  │
-│  • HistoryView      │        │  │  /hcp         │   │  │ log_interact  │  │  │
-│  • Dashboard        │        │  │  /chat        │   │  │ edit_interact │  │  │
-└─────────────────────┘        │  └──────────────┘   │  │ get_hcp_hist  │  │  │
-                               │                      │  │ suggest_fups  │  │  │
-                               │  ┌──────────────┐   │  │ analyze_sent  │  │  │
-                               │  │  PostgreSQL  │   │  └───────────────┘  │  │
-                               │  │  (Async ORM) │   └─────────────────────┘  │
-                               │  └──────────────┘         ▲                  │
-                               └──────────────────────────  │ Groq API ────────┘
-                                                          gemma2-9b-it
-```
 
----
 
-## 🧰 Tech Stack
+HCP CRM is a full-stack AI-powered Customer Relationship Management platform built for pharmaceutical field representatives. It allows reps to log Healthcare Professional (HCP) interactions through a structured form or a conversational AI chat interface powered by LangGraph and Groq.
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18 + Redux Toolkit |
-| Backend | Python 3.11 + FastAPI |
-| AI Agent | LangGraph (StateGraph) |
-| LLM | Groq — `gemma2-9b-it` (primary), `llama-3.3-70b-versatile` (fallback) |
-| Database | PostgreSQL (async via SQLAlchemy + asyncpg) |
-| Font | Google Inter |
-| Containerization | Docker + Docker Compose |
 
----
 
-## 🤖 LangGraph Agent — 5 Tools Explained
+The project is built using:
 
-The LangGraph agent (`agents/hcp_agent.py`) uses a `StateGraph` with a `ToolNode` and 5 registered tools:
 
-### 1. `log_interaction` *(Required)*
-**Purpose:** Captures structured interaction data from natural language input.
 
-**How it works:**
-- Accepts HCP name, interaction type, date/time, topics, materials, samples, outcomes, follow-up actions, and raw freeform notes
-- Sends a structured prompt to **Groq gemma2-9b-it** requesting a JSON response with:
-  - `summary` — 2–3 sentence AI-generated summary
-  - `entities` — extracted drug names, clinical terms
-  - `sentiment` — inferred from tone (Positive/Neutral/Negative)
-  - `suggested_follow_ups` — 2–3 actionable next steps
-- Returns a fully structured dict ready for PostgreSQL insert
+\* FastAPI for backend APIs
 
-**Example trigger:**
-> *"Met Dr. Priya at Apollo Hospital, discussed OncoPrime efficacy and Phase III trial data, she seemed interested, shared two brochures"*
+\* React + Redux Toolkit for frontend
 
----
+\* PostgreSQL for persistent data storage
 
-### 2. `edit_interaction` *(Required)*
-**Purpose:** Allows modification of specific fields in an already-logged interaction.
+\* LangGraph for AI agent orchestration
 
-**How it works:**
-- Takes `interaction_id`, `field` name, and `new_value`
-- Validates field is in the allowed editable set: `topics_discussed`, `outcomes`, `follow_up_actions`, `sentiment`, `materials_shared`, `samples_distributed`, `attendees`
-- Returns an edit confirmation object; the backend router (`PUT /interactions/{id}`) executes the actual DB update
-- Prevents arbitrary field modification (e.g., timestamps, IDs cannot be changed)
+\* Groq (gemma2-9b-it) as the LLM provider
 
-**Example trigger:**
-> *"Edit interaction #12, change follow_up_actions to 'Schedule CME webinar in 2 weeks'"*
+\* Docker Compose for containerized development
 
----
 
-### 3. `get_hcp_history`
-**Purpose:** Retrieves past interactions for a given HCP to brief a rep before a visit.
 
-**How it works:**
-- Takes HCP name and optional limit (default: 5)
-- Returns structured list of past interactions: dates, types, AI summaries, open follow-ups
-- Enables the agent to surface context like: *"Last time you met Dr. Sharma, she raised concerns about pricing"*
-- Used to prime the AI for follow-up suggestions
+\---
 
-**Example trigger:**
-> *"Show me the last 5 interactions with Dr. Mehta"*
 
----
 
-### 4. `suggest_follow_ups`
-**Purpose:** Generates AI-powered, prioritized next-step recommendations for a sales rep.
+\## Current Features
 
-**How it works:**
-- Calls **Groq gemma2-9b-it** with the last interaction summary and product focus area
-- Prompts the model to act as a *pharmaceutical sales coach*
-- Returns a JSON array of follow-up actions with `action`, `priority` (High/Medium/Low), and `timeframe`
-- Examples: *"Send OncoPrime clinical trial PDF within 3 days"*, *"Invite to advisory board — High priority"*
 
-**Example trigger:**
-> *"Suggest follow-ups for my meeting with Dr. Kumar about CardioMax"*
 
----
+\### Backend Features
 
-### 5. `analyze_sentiment`
-**Purpose:** Deeply analyzes the sentiment and engagement level of an HCP from interaction notes.
 
-**How it works:**
-- Sends interaction notes to **Groq gemma2-9b-it** with a CRM-context system prompt
-- Returns structured JSON:
-  - `sentiment` — Positive/Neutral/Negative
-  - `confidence` — 0.0 to 1.0 score
-  - `key_concerns` — list of objections or concerns raised by HCP
-  - `interest_level` — High/Medium/Low
-  - `recommended_approach` — one-sentence strategy for next visit
-- Used for CRM tagging and rep coaching
 
-**Example trigger:**
-> *"Analyze the sentiment of: Dr. Singh seemed reluctant, kept asking about side effects and insurance coverage"*
+\* JWT-ready FastAPI architecture
 
----
+\* HCP listing and search API
 
-## 📁 Project Structure
+\* Interaction logging API
 
-```
+\* Interaction edit API
+
+\* Interaction history by HCP
+
+\* AI chat endpoint powered by LangGraph
+
+\* PostgreSQL async integration via SQLAlchemy + asyncpg
+
+\* Auto table creation on startup
+
+\* Dockerized backend
+
+
+
+\### Frontend Features
+
+
+
+\* Responsive dashboard page
+
+\* Dual-mode interaction logging (form + chat)
+
+\* Interaction history view with edit support
+
+\* Redux Toolkit state management
+
+\* Axios API integration
+
+\* Real-time AI chat interface
+
+\* Google Inter font styling
+
+
+
+\---
+
+
+
+\## Project Structure
+
+
+
 hcp-crm/
-├── backend/
-│   ├── main.py                  # FastAPI app entry point
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   ├── .env.example
-│   ├── db/
-│   │   └── database.py          # Async PostgreSQL connection
-│   ├── models/
-│   │   ├── hcp.py               # HCP SQLAlchemy model
-│   │   └── interaction.py       # Interaction SQLAlchemy model
-│   ├── agents/
-│   │   └── hcp_agent.py         # LangGraph agent + 5 tools
-│   └── routers/
-│       ├── interactions.py      # CRUD for interactions
-│       ├── hcp.py               # HCP search and listing
-│       └── chat.py              # AI chat endpoint
-│
-├── frontend/
-│   ├── package.json
-│   ├── Dockerfile
-│   ├── public/
-│   │   └── index.html           # Google Inter font loaded here
-│   └── src/
-│       ├── App.js               # Router + Sidebar + Layout
-│       ├── index.js
-│       ├── api/
-│       │   └── axios.js         # Axios instance
-│       ├── store/
-│       │   ├── store.js         # Redux configureStore
-│       │   └── slices/
-│       │       ├── interactionSlice.js
-│       │       ├── chatSlice.js
-│       │       └── hcpSlice.js
-│       ├── components/
-│       │   ├── LogInteractionScreen.jsx  # Main dual-mode screen
-│       │   ├── HistoryView.jsx           # Interaction history + edit
-│       │   └── Dashboard.jsx             # Overview + stats
-│       └── styles/
-│           └── global.css               # All styles, Inter font
-│
-├── docker-compose.yml
-└── README.md
-```
 
----
+|
 
-## 🚀 Quick Start
++-- backend/
 
-### Option A: Docker (Recommended)
+|   +-- main.py
 
-```bash
-# 1. Clone the repo
-git clone https://github.com/YOUR_USERNAME/hcp-crm.git
-cd hcp-crm
+|   +-- requirements.txt
 
-# 2. Set your Groq API key
-echo "GROQ_API_KEY=your_key_here" > .env
+|   +-- .env.example
 
-# 3. Start all services
-docker-compose up --build
+|   +-- db/database.py
 
-# Frontend: http://localhost:3000
-# Backend:  http://localhost:8000
-# API Docs: http://localhost:8000/docs
-```
+|   +-- models/
 
-### Option B: Local Development
+|   |   +-- hcp.py
 
-**Backend:**
-```bash
+|   |   +-- interaction.py
+
+|   +-- agents/hcp\_agent.py
+
+|   +-- routers/
+
+|       +-- interactions.py
+
+|       +-- hcp.py
+
+|       +-- chat.py
+
+|
+
++-- frontend/
+
+|   +-- src/
+
+|   |   +-- components/
+
+|   |   +-- store/slices/
+
+|   |   +-- api/
+
+|   |   +-- styles/
+
+|   +-- public/
+
+|
+
++-- docker-compose.yml
+
+
+
+\---
+
+
+
+\## Tech Stack
+
+
+
+\### Backend
+
+\* FastAPI
+
+\* SQLAlchemy (async)
+
+\* PostgreSQL + asyncpg
+
+\* LangGraph
+
+\* Groq API
+
+\* python-dotenv
+
+
+
+\### Frontend
+
+\* React 18
+
+\* Redux Toolkit
+
+\* Axios
+
+\* CSS (Google Inter font)
+
+
+
+\### DevOps
+
+\* Docker
+
+\* Docker Compose
+
+
+
+\---
+
+
+
+\## AI Agent Tools
+
+
+
+| Tool | Purpose |
+
+|---|---|
+
+| log\_interaction | Extracts structured data from natural language and logs it |
+
+| edit\_interaction | Modifies specific fields of an existing interaction |
+
+| get\_hcp\_history | Retrieves past interactions for a given HCP |
+
+| suggest\_follow\_ups | Generates prioritized next-step recommendations |
+
+| analyze\_sentiment | Analyzes HCP sentiment and engagement level |
+
+
+
+\---
+
+
+
+\## Docker Services
+
+
+
+\* backend
+
+\* frontend
+
+\* postgres
+
+
+
+\---
+
+
+
+\## Run Locally
+
+
+
+Start all containers:
+
+
+
+docker compose up --build
+
+
+
+Backend API Docs: http://localhost:8000/docs
+
+
+
+Frontend: http://localhost:3000
+
+
+
+\---
+
+
+
+\## Run Without Docker
+
+
+
+\### Backend
+
+
+
 cd backend
+
 python -m venv venv
-source venv/bin/activate       # Windows: venv\Scripts\activate
+
+venv\\Scripts\\activate
+
+
+
 pip install -r requirements.txt
 
-# Create .env from example
-cp .env.example .env
-# Edit .env with your PostgreSQL URL and Groq API key
-
 uvicorn main:app --reload --port 8000
-```
 
-**Frontend:**
-```bash
+
+
+Create a .env file in backend/:
+
+
+
+DATABASE\_URL=postgresql+asyncpg://postgres:your\_password@localhost:5432/hcp\_crm
+
+GROQ\_API\_KEY=your\_groq\_api\_key\_here
+
+
+
+\### Frontend
+
+
+
 cd frontend
+
 npm install
-REACT_APP_API_URL=http://localhost:8000/api npm start
-```
 
----
+$env:REACT\_APP\_API\_URL="http://localhost:8000/api"; npm start
 
-## 🔑 Environment Variables
 
-| Variable | Description | Example |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL async connection string | `postgresql+asyncpg://postgres:password@localhost:5432/hcp_crm` |
-| `GROQ_API_KEY` | Groq API key from console.groq.com | `gsk_...` |
-| `REACT_APP_API_URL` | Backend API base URL | `http://localhost:8000/api` |
 
-Get a free Groq API key at: https://console.groq.com
+\---
 
----
 
-## 📡 API Endpoints
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/interactions` | List all interactions |
-| `POST` | `/api/interactions` | Create new interaction |
-| `PUT` | `/api/interactions/{id}` | Update a field |
-| `GET` | `/api/interactions/hcp/{hcp_id}` | Get interactions by HCP |
-| `GET` | `/api/hcp` | List all HCPs |
-| `GET` | `/api/hcp/search?q=` | Search HCPs by name |
-| `POST` | `/api/chat` | Chat with LangGraph agent |
-| `GET` | `/docs` | Swagger UI |
+\## Environment Variables
 
----
 
-## 🎥 Demo Walkthrough
 
-The video demonstrates:
-1. **Log Interaction via Form** — filling all fields and submitting
-2. **Log Interaction via Chat** — natural language → AI fills form automatically
-3. **All 5 LangGraph tools** firing with real Groq API calls
-4. **Edit Interaction** — modifying a logged record
-5. **History View** — browsing and editing past interactions
-6. **Dashboard** — stats and tool overview
+| Variable | Description |
 
----
+|---|---|
 
-## 🧠 What I Understood from This Task
+| DATABASE\_URL | PostgreSQL async connection string |
 
-This task challenged me to design a real-world AI-first CRM system for the life sciences domain. Key learnings:
+| GROQ\_API\_KEY | Groq API key from console.groq.com |
 
-- **LangGraph** enables stateful, multi-step AI agents where each tool call is a node in a graph — ideal for CRM workflows that need sequential reasoning (understand → extract → log → follow up)
-- **Groq's gemma2-9b-it** provides very fast inference for structured JSON extraction tasks, making it practical for CRM use where reps need immediate feedback
-- **HCP interactions** have nuanced structure — sentiment, entity extraction (drug names, indications), and follow-up scheduling are all domain-specific AI tasks
-- A **dual-mode interface** (form + chat) is essential for pharma reps: experienced reps prefer forms for compliance, while on-the-go logging benefits from conversational AI
-- **Redux** effectively separates UI state (chat history, form fields) from server state (fetched interactions), making the app scalable
+| REACT\_APP\_API\_URL | Backend API base URL |
 
----
 
-## 📜 License
 
-MIT License — built for educational/assignment purposes.
+\---
+
+
+
+\## Current Development Status
+
+
+
+\### Completed
+
+\* Core backend architecture
+
+\* Core frontend architecture
+
+\* PostgreSQL integration
+
+\* LangGraph AI agent with 5 tools
+
+\* Dual-mode interaction logging (form + chat)
+
+\* Interaction history and edit support
+
+\* Docker setup
+
+
+
+\### In Progress
+
+\* AWS deployment
+
+\* WebSocket live updates
+
+\* Advanced dashboard analytics
+
+
+
+\### Future Improvements
+
+\* Portfolio tracking
+
+\* Alerts engine
+
+\* Real-time charts
+
+\* Role-based access control
+
+\* Production monitoring
+
+
+
+\---
+
+
+
+\## Author
+
+
+
+Built as a full-stack AI-first CRM platform using FastAPI + React + LangGraph + Groq.
+
