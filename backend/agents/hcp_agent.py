@@ -14,20 +14,15 @@ from typing import Annotated, TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
-from models.interaction import Interaction
-from models.hcp import HCP
 import asyncio
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "your_groq_api_key_here")
-PRIMARY_MODEL = "gemma2-9b-it"
-FALLBACK_MODEL = "llama-3.3-70b-versatile"
+PRIMARY_MODEL = "llama-3.3-70b-versatile"
 
-# ─── State ───────────────────────────────────────────────────────────────────
+# --- State ---
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
@@ -35,7 +30,7 @@ class AgentState(TypedDict):
     hcp_id: Optional[int]
     session_context: dict
 
-# ─── Tool Definitions ────────────────────────────────────────────────────────
+# --- Tool Definitions ---
 
 @tool
 def log_interaction(
@@ -51,15 +46,7 @@ def log_interaction(
     follow_up_actions: str,
     raw_notes: str = ""
 ) -> dict:
-    """
-    Logs a new HCP interaction. Uses Groq LLM to:
-    - Summarize discussion topics into concise bullet points
-    - Extract named entities (drug names, clinical terms, action items)
-    - Infer sentiment from tone of notes
-    - Generate structured follow-up suggestions
-
-    Returns a structured interaction dict ready for DB insert.
-    """
+    """Logs a new HCP interaction and returns structured data."""
     llm = ChatGroq(api_key=GROQ_API_KEY, model=PRIMARY_MODEL)
 
     prompt = f"""You are a life sciences CRM assistant. Analyze this HCP interaction and return ONLY valid JSON.
@@ -110,18 +97,12 @@ Return JSON with keys:
 
 @tool
 def edit_interaction(
-    interaction_id: int,
+    interaction_id: str,
     field: str,
     new_value: str
 ) -> dict:
-    """
-    Modifies a specific field of an existing logged interaction.
-    Supported fields: topics_discussed, outcomes, follow_up_actions,
-    sentiment, materials_shared, samples_distributed, attendees.
-
-    Uses LLM to validate the edit makes contextual sense before applying.
-    Returns confirmation with old and new values.
-    """
+    """Modifies a specific field of an existing logged interaction."""
+    interaction_id = int(interaction_id)
     allowed_fields = [
         "topics_discussed", "outcomes", "follow_up_actions",
         "sentiment", "materials_shared", "samples_distributed", "attendees"
@@ -139,14 +120,9 @@ def edit_interaction(
 
 
 @tool
-def get_hcp_history(hcp_name: str, limit: int = 5) -> dict:
-    """
-    Retrieves the last N interactions logged for a given HCP.
-    Useful for briefing a rep before a visit — surfaces topics previously
-    discussed, samples given, and open follow-up items.
-
-    Returns a list of past interactions with dates, types, and AI summaries.
-    """
+def get_hcp_history(hcp_name: str, limit: str = "5") -> dict:
+    """Retrieves the last N interactions logged for a given HCP."""
+    limit = int(limit)
     return {
         "hcp_name": hcp_name,
         "limit": limit,
@@ -161,18 +137,10 @@ def suggest_follow_ups(
     last_interaction_summary: str,
     product_focus: str = ""
 ) -> dict:
-    """
-    Generates AI-powered follow-up suggestions for a sales rep based on:
-    - The summary of the last interaction
-    - The therapeutic area or product being promoted
-    - Standard pharmaceutical sales best practices
-
-    Returns a prioritized list of next actions (e.g., send clinical paper,
-    schedule CME, invite to advisory board, submit sample request).
-    """
+    """Generates AI-powered follow-up suggestions for a sales rep."""
     llm = ChatGroq(api_key=GROQ_API_KEY, model=PRIMARY_MODEL)
 
-    prompt = f"""You are a pharmaceutical sales coach. Based on this HCP interaction summary, 
+    prompt = f"""You are a pharmaceutical sales coach. Based on this HCP interaction summary,
 suggest 3-5 specific follow-up actions a medical rep should take within the next 2 weeks.
 
 HCP: {hcp_name}
@@ -196,16 +164,7 @@ Return ONLY a JSON array of objects, each with: action, priority (High/Medium/Lo
 
 @tool
 def analyze_sentiment(interaction_notes: str, hcp_name: str) -> dict:
-    """
-    Analyzes the sentiment and engagement level of an HCP from interaction notes.
-    Uses Groq LLM to detect:
-    - Overall sentiment (Positive/Neutral/Negative)
-    - Key concerns or objections raised
-    - Interest level in the promoted product
-    - Recommended rep approach for next visit
-
-    Returns a structured sentiment report for CRM tagging.
-    """
+    """Analyzes the sentiment and engagement level of an HCP from interaction notes."""
     llm = ChatGroq(api_key=GROQ_API_KEY, model=PRIMARY_MODEL)
 
     prompt = f"""Analyze the sentiment of this HCP interaction for a pharmaceutical sales CRM.
@@ -234,16 +193,31 @@ Return ONLY valid JSON with:
 
     return result
 
-# ─── Agent Graph ─────────────────────────────────────────────────────────────
+
+# --- Agent Graph ---
 
 tools = [log_interaction, edit_interaction, get_hcp_history, suggest_follow_ups, analyze_sentiment]
+tool_node = ToolNode(tools)
 
 def create_agent():
     llm = ChatGroq(api_key=GROQ_API_KEY, model=PRIMARY_MODEL).bind_tools(tools)
 
     def agent_node(state: AgentState):
+        messages = state["messages"]
+        last = messages[-1]
+
+        # If last message is a tool result, summarize and stop
+        if hasattr(last, "type") and last.type == "tool":
+            system_msg = SystemMessage(content="""You are an AI assistant for a pharmaceutical CRM system.
+A tool has just returned results. Summarize the result clearly for the user in 2-3 sentences.
+Do NOT call any more tools. Just respond with a friendly summary.""")
+            response = llm.invoke([system_msg] + messages)
+            # Force remove tool_calls to stop looping
+            response.tool_calls = []
+            return {"messages": [response]}
+
         system_msg = SystemMessage(content="""You are an AI assistant for a pharmaceutical CRM system.
-You help medical sales representatives log and manage their HCP (Healthcare Professional) interactions.
+You help medical sales representatives log and manage their HCP interactions.
 
 Available tools:
 - log_interaction: Log a new HCP visit, call, or meeting
@@ -252,28 +226,27 @@ Available tools:
 - suggest_follow_ups: Generate AI follow-up recommendations
 - analyze_sentiment: Analyze HCP sentiment from notes
 
-Always extract structured data from natural language. Be precise and professional.""")
+Call ONE tool only. After the tool returns, summarize the result. Do not call tools again.""")
 
-        messages = [system_msg] + state["messages"]
-        response = llm.invoke(messages)
+        response = llm.invoke([system_msg] + messages)
         return {"messages": [response]}
 
     def should_continue(state: AgentState):
         last = state["messages"][-1]
-        if hasattr(last, "tool_calls") and last.tool_calls:
+        if hasattr(last, "tool_calls") and last.tool_calls and len(last.tool_calls) > 0:
             return "tools"
         return END
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", agent_node)
-    graph.add_node("tools", ToolNode(tools))
+    graph.add_node("tools", tool_node)
     graph.set_entry_point("agent")
-    graph.add_conditional_edges("agent", should_continue)
+    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
     graph.add_edge("tools", "agent")
 
     return graph.compile()
 
-# Singleton agent
+
 _agent = None
 
 def get_agent():
